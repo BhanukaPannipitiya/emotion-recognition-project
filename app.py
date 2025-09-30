@@ -13,6 +13,12 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
+# Reduce OpenCV threading to avoid CPU contention on small instances
+try:
+    cv2.setNumThreads(1)
+except Exception:
+    pass
+
 # Load the model
 print("Loading model1_best.h5...")
 model = load_model('model1_best.h5')
@@ -73,15 +79,21 @@ def predict():
             image_data = image_data.split(',')[1]
         
         # Decode base64 image
+        logger.info("/predict step: decoding base64")
         image_bytes = base64.b64decode(image_data)
+        logger.info("/predict step: opening image with PIL (%d bytes)", len(image_bytes))
         image = Image.open(io.BytesIO(image_bytes))
+        logger.info("/predict step: PIL image size=%sx%s mode=%s", image.width, image.height, image.mode)
         
         # Convert PIL image to OpenCV format
         image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        logger.info("/predict step: converted to OpenCV BGR shape=%s", tuple(image_cv.shape))
         
         # Detect faces
         gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
+        logger.info("/predict step: grayscale shape=%s", tuple(gray.shape))
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        logger.info("/predict step: detected %d face(s)", 0 if faces is None else len(faces))
         
         results = []
         
@@ -94,6 +106,7 @@ def predict():
                 processed_face = preprocess_image(face_roi)
                 
                 # Predict emotion
+                logger.info("/predict step: running model.predict for detected face")
                 emotion, confidence, all_predictions = predict_emotion(processed_face)
                 
                 results.append({
@@ -104,7 +117,9 @@ def predict():
                 })
         else:
             # If no face detected, process the entire image
+            logger.info("/predict step: no faces, predicting on full frame")
             processed_image = preprocess_image(gray)
+            logger.info("/predict step: running model.predict for full frame")
             emotion, confidence, all_predictions = predict_emotion(processed_image)
             
             results.append({
