@@ -13,16 +13,40 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
+# TensorFlow runtime constraints for small instances
+try:
+    tf.config.set_visible_devices([], 'GPU')
+    tf.config.threading.set_intra_op_parallelism_threads(1)
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    logger.info("Configured TensorFlow to use CPU-only with 1 intra/inter op threads")
+except Exception as _tf_cfg_err:
+    logger.warning("Could not fully configure TensorFlow threading/visibility: %s", _tf_cfg_err)
+
 # Reduce OpenCV threading to avoid CPU contention on small instances
 try:
     cv2.setNumThreads(1)
 except Exception:
     pass
 
+@app.before_request
+def log_request_info():
+    try:
+        logger.info("%s %s - headers=%s", request.method, request.path, dict(request.headers))
+    except Exception:
+        logger.info("%s %s", request.method, request.path)
+
 # Load the model
 print("Loading model1_best.h5...")
 model = load_model('model1_best.h5')
 print("Model loaded successfully!")
+
+# Warm-up model to avoid first-request stall/compile overhead
+try:
+    dummy = np.zeros((1, 48, 48, 1), dtype=np.float32)
+    _ = model.predict(dummy, verbose=0)
+    logger.info("Model warm-up prediction completed")
+except Exception as _warm_err:
+    logger.warning("Model warm-up failed: %s", _warm_err)
 
 # Define classes and image size
 classes = ['angry', 'happy', 'neutral']

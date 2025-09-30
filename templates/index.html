@@ -150,11 +150,15 @@
         function capturePhoto() {
             if (!isRunning) return;
             
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0);
+            // Downscale to reduce payload and CPU on server
+            const targetW = 256;
+            const scale = targetW / video.videoWidth;
+            const targetH = Math.round(video.videoHeight * scale);
+            canvas.width = targetW;
+            canvas.height = targetH;
+            context.drawImage(video, 0, 0, targetW, targetH);
             
-            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+            const imageData = canvas.toDataURL('image/webp', 0.7);
             predictEmotion(imageData);
         }
 
@@ -177,8 +181,9 @@
         async function predictEmotion(imageData) {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 8000);
-                const response = await fetch('/predict', {
+                const timeoutMs = 15000;
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                const response = await fetch(window.location.origin + '/predict', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -200,7 +205,8 @@
                 
             } catch (error) {
                 console.error('Prediction error:', error);
-                updateStatus('Prediction failed', 'error');
+                const isAbort = (error && (error.name === 'AbortError' || /aborted|abort/i.test(String(error))));
+                updateStatus(isAbort ? 'Prediction timed out' : 'Prediction failed', 'error');
             }
         }
 
