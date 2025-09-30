@@ -1,135 +1,101 @@
-# 🎭 Emotion Detection Web App
+### Emotion Detection Web App — Frontend Guide
 
-A real-time emotion detection web application powered by your trained `model1_best.h5` model.
+This guide explains how to use and customize the UI (`templates/index.html`, `static/styles.css`) for the Flask-based emotion detection app.
 
-## 🚀 Quick Start
+---
 
-### Option 1: Using the startup script (Recommended)
+### Quick Start
+Start the server using one of the following and open the printed URL.
+
+Option A:
 ```bash
 python run_app.py
 ```
 
-### Option 2: Manual start
+Option B:
 ```bash
-# Install requirements (if not already installed)
 pip install -r requirements.txt
-
-# Start the Flask server
-python app.py
+python app.py    # respects PORT env; defaults to 8080
 ```
 
-Then open your browser and go to: **http://localhost:5000**
-
-## 📁 Project Structure
-
-```
-emotion-recognition-project/
-├── app.py                 # Flask backend server
-├── run_app.py            # Easy startup script
-├── model1_best.h5        # Your trained Keras model
-├── requirements.txt      # Python dependencies
-├── templates/
-│   └── index.html        # Frontend HTML
-├── static/
-│   └── styles.css        # Frontend CSS
-└── README_FRONTEND.md    # This file
+Option C:
+```bash
+bash start_app.sh
 ```
 
-## 🎯 Features
-
-- **Real-time emotion detection** using your webcam
-- **Face detection** with bounding boxes
-- **Live confidence scores** for all emotions
-- **Beautiful, responsive UI** that works on desktop and mobile
-- **Three emotion classes**: Angry, Happy, Neutral
-- **Capture photos** for analysis
-- **Model status indicators**
-
-## 🎮 How to Use
-
-1. **Start the app** using one of the methods above
-2. **Click "Start Camera"** to begin real-time detection
-3. **Look at the camera** - the app will detect your face and predict emotions
-4. **Use "Capture Photo"** to take a snapshot for analysis
-5. **Click "Stop Camera"** when done
-
-## 🔧 Technical Details
-
-### Backend (Flask)
-- Serves the Keras model via REST API
-- Handles image preprocessing (48x48 grayscale)
-- Face detection using OpenCV
-- Returns emotion predictions with confidence scores
-
-### Frontend (HTML/CSS/JavaScript)
-- Real-time video capture from webcam
-- Sends frames to backend for analysis
-- Displays results with animated progress bars
-- Responsive design for all screen sizes
-
-### Model Integration
-- Loads `model1_best.h5` on startup
-- Preprocesses images to match training format
-- Returns predictions for: angry, happy, neutral
-
-## 🛠️ Troubleshooting
-
-### Camera Issues
-- **Permission denied**: Allow camera access in your browser
-- **No video**: Check if another app is using the camera
-- **Poor detection**: Ensure good lighting and face visibility
-
-### Model Issues
-- **Model not loading**: Ensure `model1_best.h5` is in the project root
-- **Prediction errors**: Check that the model was trained on the same classes
-
-### Server Issues
-- **Port 5000 in use**: Change the port in `app.py` (line 95)
-- **Dependencies missing**: Run `pip install -r requirements.txt`
-
-## 📱 Browser Compatibility
-
-- ✅ Chrome (recommended)
-- ✅ Firefox
-- ✅ Safari
-- ✅ Edge
-- ❌ Internet Explorer
-
-## 🔒 Privacy & Security
-
-- All processing happens locally on your machine
-- No data is sent to external servers
-- Camera access is only used for emotion detection
-- Images are not stored permanently
-
-## 🎨 Customization
-
-### Changing the Model
-Replace `model1_best.h5` with your own trained model and update the classes in `app.py` (line 15).
-
-### Styling
-Modify `static/styles.css` to change the appearance of the web app.
-
-### Adding New Emotions
-1. Retrain your model with new classes
-2. Update the `classes` list in `app.py`
-3. Update the frontend in `templates/index.html`
-
-## 📊 Performance
-
-- **Model loading**: ~2-3 seconds on startup
-- **Prediction speed**: ~50-100ms per frame
-- **Memory usage**: ~200-300MB (including TensorFlow)
-- **CPU usage**: Moderate (depends on your hardware)
-
-## 🆘 Support
-
-If you encounter any issues:
-1. Check the console output for error messages
-2. Ensure all dependencies are installed
-3. Verify the model file exists and is valid
-4. Try refreshing the browser page
+Default URLs:
+- `run_app.py`: http://localhost:5000
+- `app.py` default: http://localhost:8080 (or your `PORT`)
 
 ---
 
-**Enjoy your emotion detection app! 🎉**
+### UI Overview
+- Tabs: Upload and Webcam
+- Results: predicted emotion, confidence bar, all class probabilities
+- Face box overlay on uploaded images when detection succeeds
+
+Supported classes (backend): `angry`, `happy`, `neutral`.
+
+---
+
+### How to Use
+Upload tab:
+1. Drag-and-drop or click to select an image (JPG/PNG/WEBP/GIF, < 5MB)
+2. Click "Analyze Emotion"
+3. View prediction, confidence, probabilities, and face box
+
+Webcam tab:
+1. Click "Start Webcam" and allow camera access
+2. Click "Capture & Analyze" to send a snapshot to the backend
+3. View prediction and probabilities
+
+---
+
+### Frontend–Backend Contract
+Endpoints used by the UI:
+- `POST /upload` — multipart form; field `file`
+- `POST /predict` — JSON `{ image: "data:image/jpeg;base64,..." }`
+
+Response shape (simplified):
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "emotion": "happy",
+      "confidence": 0.92,
+      "all_predictions": { "angry": 0.01, "happy": 0.92, "neutral": 0.07 },
+      "face_box": [x, y, w, h]
+    }
+  ]
+}
+```
+
+If no face is detected, the backend analyzes a centered crop and still returns a prediction.
+
+---
+
+### Customization
+- Change classes: update `classes` in `app.py` and the UI labels/icons in `templates/index.html`.
+- Styling: edit `static/styles.css` for colors, layout, animations.
+- Icons: Font Awesome is loaded via CDN in `index.html`.
+- Canvas overlay: bounding box drawing uses `previewCanvas` in `index.html` script.
+
+---
+
+### Troubleshooting
+- Camera permission denied: allow access in the browser.
+- No video: ensure no other app uses the camera; try another browser.
+- Large images: the backend resizes internally; ensure file < 5MB.
+- Missing model: place `model1_best.h5` in the project root.
+
+Browser support: Chrome, Firefox, Safari, Edge.
+
+---
+
+### Notes for Developers
+- Preprocessing: CLAHE + resize to 48×48 grayscale + normalization (handled server-side).
+- Detection: MediaPipe first, Haar cascade fallback.
+- Performance: CPU-only TF with limited threads; OpenCV threads set to 1.
+
+For deeper backend details, see `README.md` and `app.py`.

@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 import os
 import math
 import mediapipe as mp
+import threading
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -41,18 +42,35 @@ def log_request_info():
     except Exception:
         logger.info("%s %s", request.method, request.path)
 
-# Load the model
-print("Loading model1_best.h5...")
-model = load_model('model1_best.h5')
-print("Model loaded successfully!")
+# Lazy model loading to avoid blocking startup and static file serving
+model = None
+_model_lock = threading.Lock()
+_model_warmup_started = False
 
-# Warm-up model to avoid first-request stall/compile overhead
-try:
-    dummy = np.zeros((1, 48, 48, 1), dtype=np.float32)
-    _ = model.predict(dummy, verbose=0)
-    logger.info("Model warm-up prediction completed")
-except Exception as _warm_err:
-    logger.warning("Model warm-up failed: %s", _warm_err)
+def _warmup_model():
+    try:
+        m = get_model()
+        dummy = np.zeros((1, 48, 48, 1), dtype=np.float32)
+        _ = m.predict(dummy, verbose=0)
+        logger.info("Model warm-up prediction completed")
+    except Exception as _warm_err:
+        logger.warning("Model warm-up failed: %s", _warm_err)
+
+def get_model():
+    global model, _model_warmup_started
+    if model is None:
+        with _model_lock:
+            if model is None:
+                logger.info("Lazy-loading model1_best.h5...")
+                local_model = load_model('model1_best.h5')
+                model_ref = local_model
+                # Assign only after successful load to avoid half-initialized state
+                globals()['model'] = model_ref
+                logger.info("Model loaded successfully!")
+                if not _model_warmup_started:
+                    _model_warmup_started = True
+                    threading.Thread(target=_warmup_model, daemon=True).start()
+    return model
 
 # Define classes and image size
 classes = ['angry', 'happy', 'neutral']
@@ -149,7 +167,8 @@ def preprocess_image(image_gray):
 
 def predict_emotion(image):
     """Predict emotion from preprocessed image"""
-    predictions = model.predict(image, verbose=0)
+    m = get_model()
+    predictions = m.predict(image, verbose=0)
     predicted_class = np.argmax(predictions[0])
     confidence = predictions[0][predicted_class]
     emotion = classes[predicted_class]
