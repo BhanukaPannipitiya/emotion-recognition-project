@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+from werkzeug.utils import secure_filename
 import logging
 import cv2
 import numpy as np
@@ -6,10 +7,15 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 import base64
 import io
-from PIL import Image
+from PIL import Image, ImageOps
 import os
+import math
+import mediapipe as mp
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+ALLOWED_EXTENSIONS = { 'png', 'jpg', 'jpeg', 'webp', 'gif' }
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -52,26 +58,94 @@ except Exception as _warm_err:
 classes = ['angry', 'happy', 'neutral']
 img_size = (48, 48)
 
-# Load face cascade
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# MediaPipe face detector (CPU-friendly and robust)
+mp_face = mp.solutions.face_detection
+_mp_detector = mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
-def preprocess_image(image):
-    """Preprocess image for model prediction"""
-    # Convert to grayscale if needed
-    if len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
+# OpenCV Haar Cascade fallback (robust on some edge cases and small faces)
+try:
+    _haar = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+except Exception:
+    _haar = None
+
+def _detect_faces_mediapipe(image_bgr):
+    """Detect faces and return list of [x, y, w, h] in pixel coords.
+    Uses MediaPipe FaceDetection on RGB input internally.
+    """
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    results = _mp_detector.process(image_rgb)
+    boxes = []
+    if results.detections:
+        h, w = image_bgr.shape[:2]
+        for det in results.detections:
+            bbox = det.location_data.relative_bounding_box
+            x = max(0, int(bbox.xmin * w))
+            y = max(0, int(bbox.ymin * h))
+            bw = max(1, int(bbox.width * w))
+            bh = max(1, int(bbox.height * h))
+            boxes.append([x, y, bw, bh])
+    return boxes
+
+def _detect_faces_haar(image_bgr):
+    """Detect faces using OpenCV Haar cascade. Returns list of [x, y, w, h]."""
+    if _haar is None:
+        return []
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    # Equalize to improve detection in varying lighting
+    gray = cv2.equalizeHist(gray)
+    faces = _haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    boxes = [[int(x), int(y), int(w), int(h)] for (x, y, w, h) in faces]
+    return boxes
+
+def _resize_long_side(image_bgr, max_side=1280):
+    """Downscale extremely large images for faster/more robust detection, keep aspect ratio."""
+    h, w = image_bgr.shape[:2]
+    scale = 1.0
+    if max(h, w) > max_side:
+        scale = max_side / float(max(h, w))
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        resized = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        return resized, scale
+    return image_bgr, 1.0
+
+def detect_faces(image_bgr):
+    """Try multiple detectors and return face boxes in original image coordinates."""
+    # Work on a smaller copy for speed if very large
+    work_img, scale = _resize_long_side(image_bgr, max_side=1280)
+    boxes = _detect_faces_mediapipe(work_img)
+    if not boxes:
+        boxes = _detect_faces_haar(work_img)
+    # Map boxes back to original coordinates if resized
+    if scale != 1.0 and boxes:
+        inv = 1.0 / scale
+        boxes = [[int(x * inv), int(y * inv), int(w * inv), int(h * inv)] for x, y, w, h in boxes]
+    return boxes
+
+def _expand_box(x, y, w, h, img_w, img_h, margin=0.2):
+    """Expand box by margin while clamping to image bounds."""
+    cx = x + w / 2.0
+    cy = y + h / 2.0
+    size = max(w, h)
+    size = size * (1.0 + margin)
+    nx = int(max(0, math.floor(cx - size / 2.0)))
+    ny = int(max(0, math.floor(cy - size / 2.0)))
+    nsize = int(min(size, min(img_w - nx, img_h - ny)))
+    return nx, ny, nsize, nsize
+
+def preprocess_image(image_gray):
+    """Preprocess face ROI for model prediction: CLAHE + resize + normalize."""
+    if len(image_gray.shape) == 3:
+        image_gray = cv2.cvtColor(image_gray, cv2.COLOR_BGR2GRAY)
+    # CLAHE for lighting robustness
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    image_eq = clahe.apply(image_gray)
     # Resize to model input size
-    image = cv2.resize(image, img_size)
-    
-    # Normalize to [0, 1]
-    image = image.astype(np.float32) / 255.0
-    
-    # Add channel dimension and batch dimension
-    image = np.expand_dims(image, axis=-1)  # (48, 48, 1)
-    image = np.expand_dims(image, axis=0)   # (1, 48, 48, 1)
-    
-    return image
+    image_resized = cv2.resize(image_eq, img_size)
+    image_norm = image_resized.astype(np.float32) / 255.0
+    image_norm = np.expand_dims(image_norm, axis=-1)
+    image_norm = np.expand_dims(image_norm, axis=0)
+    return image_norm
 
 def predict_emotion(image):
     """Predict emotion from preprocessed image"""
@@ -82,10 +156,78 @@ def predict_emotion(image):
     
     return emotion, confidence, predictions[0].tolist()
 
+def _allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @app.route('/')
 def index():
     logger.info("GET / - rendering index.html")
     return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    try:
+        if 'file' not in request.files:
+            logger.warning("/upload called without 'file' in form-data")
+            return jsonify({'success': False, 'error': "Missing 'file' in form-data"}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+        if not _allowed_file(file.filename):
+            return jsonify({'success': False, 'error': 'Unsupported file type'}), 400
+
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(save_path)
+        logger.info("/upload saved file to %s", save_path)
+
+        # Open and process image (handle EXIF rotation)
+        image = Image.open(save_path)
+        image = ImageOps.exif_transpose(image)
+        image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+        faces = detect_faces(image_cv)
+        results = []
+        if len(faces) > 0:
+            h_img, w_img = image_cv.shape[:2]
+            faces_sorted = sorted(faces, key=lambda b: b[2]*b[3], reverse=True)
+            x, y, w, h = faces_sorted[0]
+            x, y, w, h = _expand_box(x, y, w, h, w_img, h_img, margin=0.2)
+            face_roi_color = image_cv[y:y+h, x:x+w]
+            processed_face = preprocess_image(face_roi_color)
+            emotion, confidence, all_predictions = predict_emotion(processed_face)
+            results.append({
+                'emotion': emotion,
+                'confidence': float(confidence),
+                'all_predictions': dict(zip(classes, all_predictions)),
+                'face_box': [int(x), int(y), int(w), int(h)]
+            })
+        else:
+            # Final fallback: centered square crop to always produce a result
+            h_img, w_img = image_cv.shape[:2]
+            side = int(min(h_img, w_img) * 0.6)
+            cx, cy = w_img // 2, h_img // 2
+            x = max(0, cx - side // 2)
+            y = max(0, cy - side // 2)
+            x = min(x, w_img - side)
+            y = min(y, h_img - side)
+            face_roi_color = image_cv[y:y+side, x:x+side]
+            processed_face = preprocess_image(face_roi_color)
+            emotion, confidence, all_predictions = predict_emotion(processed_face)
+            results.append({
+                'emotion': emotion,
+                'confidence': float(confidence),
+                'all_predictions': dict(zip(classes, all_predictions)),
+                'face_box': [int(x), int(y), int(side), int(side)]
+            })
+
+        return jsonify({'success': True, 'results': results, 'filename': filename})
+    except Exception as e:
+        logger.exception("/upload failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -107,50 +249,53 @@ def predict():
         image_bytes = base64.b64decode(image_data)
         logger.info("/predict step: opening image with PIL (%d bytes)", len(image_bytes))
         image = Image.open(io.BytesIO(image_bytes))
+        image = ImageOps.exif_transpose(image)
         logger.info("/predict step: PIL image size=%sx%s mode=%s", image.width, image.height, image.mode)
         
         # Convert PIL image to OpenCV format
         image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         logger.info("/predict step: converted to OpenCV BGR shape=%s", tuple(image_cv.shape))
         
-        # Detect faces
-        gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
-        logger.info("/predict step: grayscale shape=%s", tuple(gray.shape))
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-        logger.info("/predict step: detected %d face(s)", 0 if faces is None else len(faces))
+        # Detect faces using cascaded detectors
+        faces = detect_faces(image_cv)
+        logger.info("/predict step: detected %d face(s)", len(faces))
         
         results = []
         
         if len(faces) > 0:
-            for (x, y, w, h) in faces:
-                # Extract face region
-                face_roi = gray[y:y+h, x:x+w]
-                
-                # Preprocess face for emotion prediction
-                processed_face = preprocess_image(face_roi)
-                
-                # Predict emotion
-                logger.info("/predict step: running model.predict for detected face")
-                emotion, confidence, all_predictions = predict_emotion(processed_face)
-                
-                results.append({
-                    'emotion': emotion,
-                    'confidence': float(confidence),
-                    'all_predictions': dict(zip(classes, all_predictions)),
-                    'face_box': [int(x), int(y), int(w), int(h)]
-                })
-        else:
-            # If no face detected, process the entire image
-            logger.info("/predict step: no faces, predicting on full frame")
-            processed_image = preprocess_image(gray)
-            logger.info("/predict step: running model.predict for full frame")
-            emotion, confidence, all_predictions = predict_emotion(processed_image)
-            
+            # Pick largest face and add margin
+            h_img, w_img = image_cv.shape[:2]
+            faces_sorted = sorted(faces, key=lambda b: b[2]*b[3], reverse=True)
+            x, y, w, h = faces_sorted[0]
+            x, y, w, h = _expand_box(x, y, w, h, w_img, h_img, margin=0.2)
+            # Extract face region
+            face_roi_color = image_cv[y:y+h, x:x+w]
+            processed_face = preprocess_image(face_roi_color)
+            logger.info("/predict step: running model.predict for face crop")
+            emotion, confidence, all_predictions = predict_emotion(processed_face)
             results.append({
                 'emotion': emotion,
                 'confidence': float(confidence),
                 'all_predictions': dict(zip(classes, all_predictions)),
-                'face_box': None
+                'face_box': [int(x), int(y), int(w), int(h)]
+            })
+        else:
+            logger.info("/predict step: no faces detected - using center crop fallback")
+            h_img, w_img = image_cv.shape[:2]
+            side = int(min(h_img, w_img) * 0.6)
+            cx, cy = w_img // 2, h_img // 2
+            x = max(0, cx - side // 2)
+            y = max(0, cy - side // 2)
+            x = min(x, w_img - side)
+            y = min(y, h_img - side)
+            face_roi_color = image_cv[y:y+side, x:x+side]
+            processed_face = preprocess_image(face_roi_color)
+            emotion, confidence, all_predictions = predict_emotion(processed_face)
+            results.append({
+                'emotion': emotion,
+                'confidence': float(confidence),
+                'all_predictions': dict(zip(classes, all_predictions)),
+                'face_box': [int(x), int(y), int(side), int(side)]
             })
         
         logger.info("/predict returning %d result(s)", len(results))

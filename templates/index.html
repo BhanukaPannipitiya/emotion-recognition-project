@@ -3,292 +3,344 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-Time Emotion Detection - Model1_best</title>
+    <title>Emotion Detection</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
     <div class="container">
-        <h1>🎭 Real-Time Emotion Detection</h1>
-        <p class="subtitle">Powered by Model1_best.h5</p>
-        
-        <div class="main-content">
-            <div class="video-section">
-                <div class="video-container">
-                    <video id="video" autoplay playsinline muted></video>
-                    <canvas id="canvas" style="display:none;"></canvas>
-                    <div id="overlay" class="overlay"></div>
-                </div>
-                
-                <div class="controls">
-                    <button id="startBtn" class="btn btn-primary">Start Camera</button>
-                    <button id="stopBtn" class="btn btn-secondary" disabled>Stop Camera</button>
-                    <button id="captureBtn" class="btn btn-success" disabled>Capture Photo</button>
-                </div>
+        <header>
+            <div class="logo">
+                <i class="fas fa-brain"></i>
             </div>
-            
-            <div class="results-section">
-                <div class="results">
-                    <div id="emotion" class="emotion-display">
-                        <div class="emotion-text">Emotion: Ready to detect...</div>
-                        <div class="confidence-bar">
-                            <div class="confidence-fill" id="confidenceFill"></div>
+            <h1>Emotion Detection</h1>
+            <p class="subtitle">Upload an image or use your webcam. Backend classes: angry, happy, neutral.</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" id="tabUpload">Upload</button>
+            <button class="tab-btn" id="tabWebcam">Webcam</button>
+        </div>
+
+        <div class="app-container">
+            <div class="card" id="uploadCard">
+                <h2 class="card-title">
+                    <i class="fas fa-file-upload"></i>
+                    Upload Image
+                </h2>
+                <div class="input-section">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-placeholder" id="uploadPlaceholder">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <div class="upload-text">Drag & Drop or Click to Upload</div>
+                            <div class="upload-hint">JPG, PNG, WEBP, GIF (Max 5MB)</div>
                         </div>
-                        <div class="confidence-text" id="confidenceText">Confidence: 0%</div>
-                    </div>
-                    
-                    <div class="predictions-grid" id="predictionsGrid">
-                        <div class="prediction-item">
-                            <span class="emotion-label angry">Angry</span>
-                            <div class="prediction-bar">
-                                <div class="prediction-fill" id="angryBar"></div>
-                            </div>
-                            <span class="prediction-value" id="angryValue">0%</span>
-                        </div>
-                        <div class="prediction-item">
-                            <span class="emotion-label happy">Happy</span>
-                            <div class="prediction-bar">
-                                <div class="prediction-fill" id="happyBar"></div>
-                            </div>
-                            <span class="prediction-value" id="happyValue">0%</span>
-                        </div>
-                        <div class="prediction-item">
-                            <span class="emotion-label neutral">Neutral</span>
-                            <div class="prediction-bar">
-                                <div class="prediction-fill" id="neutralBar"></div>
-                            </div>
-                            <span class="prediction-value" id="neutralValue">0%</span>
+                        <div class="preview-container" id="previewContainer">
+                            <img id="previewImage" class="preview-image" src="" alt="Preview">
+                            <canvas id="previewCanvas" class="preview-canvas"></canvas>
                         </div>
                     </div>
+                    <input type="file" id="fileInput" class="file-input" accept=".png,.jpg,.jpeg,.webp,.gif">
+                    <button class="btn" id="analyzeBtn">
+                        <i class="fas fa-search"></i>
+                        Analyze Emotion
+                    </button>
                 </div>
+                <div class="alert alert-error" id="errorAlert"></div>
+                <div class="loading" id="uploadLoading">
+                    <div class="spinner"></div>
+                    <p>Analyzing image...</p>
+                </div>
+                <div class="results-section" id="uploadResults"></div>
+            </div>
+
+            <div class="card" id="webcamCard" style="display:none;">
+                <h2 class="card-title">
+                    <i class="fas fa-camera"></i>
+                    Live Webcam
+                </h2>
+                <div class="input-section">
+                    <div class="webcam-container">
+                        <video id="videoElement" autoplay playsinline></video>
+                    </div>
+                    <div class="webcam-controls">
+                        <button class="btn" id="startWebcamBtn">
+                            <i class="fas fa-play"></i>
+                            Start Webcam
+                        </button>
+                        <button class="btn btn-secondary" id="captureBtn" disabled>
+                            <i class="fas fa-camera"></i>
+                            Capture & Analyze
+                        </button>
+                    </div>
+                </div>
+                <div class="loading" id="webcamLoading">
+                    <div class="spinner"></div>
+                    <p>Analyzing capture...</p>
+                </div>
+                <div class="results-section" id="webcamResults"></div>
             </div>
         </div>
-        
-        <div class="status" id="status">
-            <div class="status-indicator" id="statusIndicator"></div>
-            <span id="statusText">Ready</span>
-        </div>
+
+        <footer>
+            <p>Flask + TensorFlow + MediaPipe</p>
+        </footer>
     </div>
 
     <script>
-        let video, canvas, context;
-        let isRunning = false;
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewImage = document.getElementById('previewImage');
+        const previewCanvas = document.getElementById('previewCanvas');
+        const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const errorAlert = document.getElementById('errorAlert');
+        const uploadLoading = document.getElementById('uploadLoading');
+        const uploadResults = document.getElementById('uploadResults');
+
+        const startWebcamBtn = document.getElementById('startWebcamBtn');
+        const captureBtn = document.getElementById('captureBtn');
+        const videoElement = document.getElementById('videoElement');
+        const webcamLoading = document.getElementById('webcamLoading');
+        const webcamResults = document.getElementById('webcamResults');
+        const tabUpload = document.getElementById('tabUpload');
+        const tabWebcam = document.getElementById('tabWebcam');
+        const uploadCard = document.getElementById('uploadCard');
+        const webcamCard = document.getElementById('webcamCard');
+
         let stream = null;
 
-        // DOM elements
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const captureBtn = document.getElementById('captureBtn');
-        const emotionDisplay = document.getElementById('emotion');
-        const statusIndicator = document.getElementById('statusIndicator');
-        const statusText = document.getElementById('statusText');
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            video = document.getElementById('video');
-            canvas = document.getElementById('canvas');
-            context = canvas.getContext('2d');
-            
-            setupEventListeners();
-            updateStatus('Ready to start', 'ready');
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('upload-area-hover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('upload-area-hover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('upload-area-hover');
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelect();
+            }
         });
 
-        function setupEventListeners() {
-            startBtn.addEventListener('click', startCamera);
-            stopBtn.addEventListener('click', stopCamera);
-            captureBtn.addEventListener('click', capturePhoto);
-        }
+        fileInput.addEventListener('change', handleFileSelect);
+        analyzeBtn.addEventListener('click', analyzeImage);
+        startWebcamBtn.addEventListener('click', startWebcam);
+        captureBtn.addEventListener('click', captureImage);
+        tabUpload.addEventListener('click', () => switchTab('upload'));
+        tabWebcam.addEventListener('click', () => switchTab('webcam'));
 
-        async function startCamera() {
-            try {
-                updateStatus('Starting camera...', 'loading');
-                
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        width: 640, 
-                        height: 480,
-                        facingMode: 'user'
-                    } 
-                });
-                
-                video.srcObject = stream;
-                
-                video.onloadedmetadata = () => {
-                    video.play();
-                    isRunning = true;
-                    startBtn.disabled = true;
-                    stopBtn.disabled = false;
-                    captureBtn.disabled = false;
-                    updateStatus('Camera active - Detecting emotions...', 'active');
-                    predictLoop();
-                };
-                
-            } catch (error) {
-                console.error('Error accessing camera:', error);
-                updateStatus('Camera access denied. Please allow camera permissions.', 'error');
+        function handleFileSelect() {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+            if (!validTypes.includes(file.type)) {
+                showError('Please select a valid image file (JPG, PNG, WEBP, GIF)');
+                return;
             }
-        }
-
-        function stopCamera() {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
+            if (file.size > 5 * 1024 * 1024) {
+                showError('File size must be less than 5MB');
+                return;
             }
-            
-            isRunning = false;
-            video.srcObject = null;
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            captureBtn.disabled = true;
-            updateStatus('Camera stopped', 'ready');
-            
-            // Clear display
-            document.querySelector('.emotion-text').textContent = 'Emotion: Ready to detect...';
-            document.getElementById('confidenceText').textContent = 'Confidence: 0%';
-            clearPredictions();
-        }
 
-        function capturePhoto() {
-            if (!isRunning) return;
-            
-            // Downscale to reduce payload and CPU on server
-            const targetW = 256;
-            const scale = targetW / video.videoWidth;
-            const targetH = Math.round(video.videoHeight * scale);
-            canvas.width = targetW;
-            canvas.height = targetH;
-            context.drawImage(video, 0, 0, targetW, targetH);
-            
-            const imageData = canvas.toDataURL('image/webp', 0.7);
-            predictEmotion(imageData);
-        }
+            hideError();
+            previewContainer.style.display = 'block';
+            uploadPlaceholder.style.display = 'none';
 
-        async function predictLoop() {
-            if (!isRunning) return;
-            
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0);
-            
-            const imageData = canvas.toDataURL('image/jpeg', 0.8);
-            await predictEmotion(imageData);
-            
-            if (isRunning) {
-                // Throttle to reduce backend CPU load on Render
-                setTimeout(() => requestAnimationFrame(predictLoop), 800);
-            }
-        }
-
-        async function predictEmotion(imageData) {
-            try {
-                const controller = new AbortController();
-                const timeoutMs = 15000;
-                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-                const response = await fetch(window.location.origin + '/predict', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ image: imageData }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-
-                const data = await response.json();
-                
-                if (data.success && data.results.length > 0) {
-                    const result = data.results[0];
-                    updateEmotionDisplay(result);
-                    drawFaceBoxes(data.results);
-                } else {
-                    updateStatus('No face detected', 'warning');
-                }
-                
-            } catch (error) {
-                console.error('Prediction error:', error);
-                const isAbort = (error && (error.name === 'AbortError' || /aborted|abort/i.test(String(error))));
-                updateStatus(isAbort ? 'Prediction timed out' : 'Prediction failed', 'error');
-            }
-        }
-
-        function updateEmotionDisplay(result) {
-            const { emotion, confidence, all_predictions } = result;
-            
-            // Update main emotion display
-            document.querySelector('.emotion-text').textContent = `Emotion: ${emotion.toUpperCase()}`;
-            document.getElementById('confidenceText').textContent = `Confidence: ${(confidence * 100).toFixed(1)}%`;
-            
-            // Update confidence bar
-            const confidenceFill = document.getElementById('confidenceFill');
-            confidenceFill.style.width = `${confidence * 100}%`;
-            confidenceFill.className = `confidence-fill ${emotion}`;
-            
-            // Update prediction bars
-            updatePredictionBar('angry', all_predictions.angry);
-            updatePredictionBar('happy', all_predictions.happy);
-            updatePredictionBar('neutral', all_predictions.neutral);
-        }
-
-        function updatePredictionBar(emotion, value) {
-            const bar = document.getElementById(`${emotion}Bar`);
-            const text = document.getElementById(`${emotion}Value`);
-            
-            bar.style.width = `${value * 100}%`;
-            text.textContent = `${(value * 100).toFixed(1)}%`;
-        }
-
-        function clearPredictions() {
-            ['angry', 'happy', 'neutral'].forEach(emotion => {
-                document.getElementById(`${emotion}Bar`).style.width = '0%';
-                document.getElementById(`${emotion}Value`).textContent = '0%';
-            });
-            document.getElementById('confidenceFill').style.width = '0%';
-        }
-
-        function drawFaceBoxes(results) {
-            const overlay = document.getElementById('overlay');
-            overlay.innerHTML = '';
-            
-            results.forEach(result => {
-                if (result.face_box) {
-                    const [x, y, w, h] = result.face_box;
-                    const faceBox = document.createElement('div');
-                    faceBox.className = 'face-box';
-                    faceBox.style.left = `${x}px`;
-                    faceBox.style.top = `${y}px`;
-                    faceBox.style.width = `${w}px`;
-                    faceBox.style.height = `${h}px`;
-                    faceBox.style.borderColor = getEmotionColor(result.emotion);
-                    overlay.appendChild(faceBox);
-                }
-            });
-        }
-
-        function getEmotionColor(emotion) {
-            const colors = {
-                'angry': '#ff4444',
-                'happy': '#44ff44',
-                'neutral': '#4444ff'
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImage.src = e.target.result;
+                uploadResults.innerHTML = '';
+                previewImage.onload = () => resizeCanvasToImage();
             };
-            return colors[emotion] || '#ffffff';
+            reader.readAsDataURL(file);
         }
 
-        function updateStatus(message, type) {
-            statusText.textContent = message;
-            statusIndicator.className = `status-indicator ${type}`;
+        function resizeCanvasToImage() {
+            // Match canvas to the upload area's inner box
+            const rect = previewImage.getBoundingClientRect();
+            previewCanvas.width = rect.width;
+            previewCanvas.height = rect.height;
+            previewCanvas.style.width = rect.width + 'px';
+            previewCanvas.style.height = rect.height + 'px';
+            const ctx = previewCanvas.getContext('2d');
+            ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
         }
 
-        // Test connection on load
-        window.addEventListener('load', async () => {
-            try {
-                const response = await fetch('/test');
-                const data = await response.json();
-                if (data.success) {
-                    console.log('Model is ready:', data.message);
-                }
-            } catch (error) {
-                console.error('Model test failed:', error);
-                updateStatus('Model connection failed', 'error');
+        function analyzeImage() {
+            if (!fileInput.files.length) {
+                showError('Please select an image first');
+                return;
             }
+
+            uploadLoading.style.display = 'block';
+            analyzeBtn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            fetch('/upload', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    uploadLoading.style.display = 'none';
+                    analyzeBtn.disabled = false;
+                    if (data.success) {
+                        displayResults(data.results, uploadResults, previewImage);
+                    } else {
+                        showError(data.error || 'Analysis failed');
+                    }
+                })
+                .catch(err => {
+                    uploadLoading.style.display = 'none';
+                    analyzeBtn.disabled = false;
+                    showError('Network error: ' + err.message);
+                });
+        }
+
+        function startWebcam() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(function(mediaStream) {
+                        stream = mediaStream;
+                        videoElement.srcObject = stream;
+                        startWebcamBtn.disabled = true;
+                        captureBtn.disabled = false;
+                        webcamResults.innerHTML = '';
+                    })
+                    .catch(function(error) {
+                        showError('Error accessing webcam: ' + error.message);
+                    });
+            } else {
+                showError('Your browser does not support webcam access');
+            }
+        }
+
+        function captureImage() {
+            if (!stream) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            webcamLoading.style.display = 'block';
+            captureBtn.disabled = true;
+
+            fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: imageData })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    webcamLoading.style.display = 'none';
+                    captureBtn.disabled = false;
+                    if (data.success) {
+                        const tempImg = new Image();
+                        tempImg.src = imageData;
+                        tempImg.onload = () => displayResults(data.results, webcamResults, tempImg);
+                    } else {
+                        showError(data.error || 'Analysis failed');
+                    }
+                })
+                .catch(err => {
+                    webcamLoading.style.display = 'none';
+                    captureBtn.disabled = false;
+                    showError('Network error: ' + err.message);
+                });
+        }
+
+        function displayResults(results, container, imageElement) {
+            container.innerHTML = '';
+            if (!results || results.length === 0) {
+                container.innerHTML = '<div class="alert alert-error">No faces detected in the image</div>';
+                return;
+            }
+
+            const result = results[0];
+            let emotionClass = 'emotion-neutral';
+            if (result.emotion === 'angry') emotionClass = 'emotion-angry';
+            if (result.emotion === 'happy') emotionClass = 'emotion-happy';
+
+            const emotionHTML = `
+                <div class="emotion-result">
+                    <div class="emotion-icon ${emotionClass}">
+                        <i class="fas ${result.emotion === 'angry' ? 'fa-angry' : result.emotion === 'happy' ? 'fa-laugh-beam' : 'fa-meh'}"></i>
+                    </div>
+                    <div class="emotion-details">
+                        <div class="emotion-name">${capitalize(result.emotion)}</div>
+                        <div class="emotion-confidence">Confidence: ${(result.confidence * 100).toFixed(2)}%</div>
+                        <div class="confidence-bar"><div class="confidence-level" style="width: ${result.confidence * 100}%"></div></div>
+                    </div>
+                </div>`;
+
+            const allEmotionsHTML = `
+                <div class="results-title"><i class="fas fa-chart-bar"></i>All Emotion Probabilities</div>
+                <div class="all-emotions">
+                    ${Object.entries(result.all_predictions).map(([e, p]) => `
+                        <div class="emotion-item">
+                            <div class="emotion-label">${capitalize(e)}</div>
+                            <div class="emotion-percent">${(p * 100).toFixed(1)}%</div>
+                        </div>`).join('')}
+                </div>`;
+
+            container.innerHTML = emotionHTML + allEmotionsHTML;
+
+            if (result.face_box && imageElement === previewImage) {
+                resizeCanvasToImage();
+                const [x, y, w, h] = result.face_box;
+                const scaleX = imageElement.naturalWidth / imageElement.clientWidth;
+                const scaleY = imageElement.naturalHeight / imageElement.clientHeight;
+                const ctx = previewCanvas.getContext('2d');
+                ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#f72585';
+                if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(x / scaleX, y / scaleY, w / scaleX, h / scaleY, 8);
+                    ctx.stroke();
+                } else {
+                    ctx.strokeRect(x / scaleX, y / scaleY, w / scaleX, h / scaleY);
+                }
+            }
+        }
+
+        function showError(message) {
+            errorAlert.textContent = message;
+            errorAlert.style.display = 'block';
+        }
+
+        function hideError() {
+            errorAlert.style.display = 'none';
+        }
+
+        function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+        function switchTab(which) {
+            if (which === 'upload') {
+                tabUpload.classList.add('active');
+                tabWebcam.classList.remove('active');
+                uploadCard.style.display = '';
+                webcamCard.style.display = 'none';
+            } else {
+                tabWebcam.classList.add('active');
+                tabUpload.classList.remove('active');
+                webcamCard.style.display = '';
+                uploadCard.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(t => t.stop());
         });
     </script>
 </body>

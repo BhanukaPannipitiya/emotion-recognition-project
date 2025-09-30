@@ -63,3 +63,6 @@ build/
 .env
 .env.*
 .envrc
+
+# Uploaded files
+uploads/
