@@ -11,48 +11,54 @@
         <h1>🎭 Real-Time Emotion Detection</h1>
         <p class="subtitle">Powered by Model1_best.h5</p>
         
-        <div class="video-container">
-            <video id="video" autoplay playsinline muted></video>
-            <canvas id="canvas" style="display:none;"></canvas>
-            <div id="overlay" class="overlay"></div>
-        </div>
-        
-        <div class="controls">
-            <button id="startBtn" class="btn btn-primary">Start Camera</button>
-            <button id="stopBtn" class="btn btn-secondary" disabled>Stop Camera</button>
-            <button id="captureBtn" class="btn btn-success" disabled>Capture Photo</button>
-        </div>
-        
-        <div class="results">
-            <div id="emotion" class="emotion-display">
-                <div class="emotion-text">Emotion: Ready to detect...</div>
-                <div class="confidence-bar">
-                    <div class="confidence-fill" id="confidenceFill"></div>
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <video id="video" autoplay playsinline muted></video>
+                    <canvas id="canvas" style="display:none;"></canvas>
+                    <div id="overlay" class="overlay"></div>
                 </div>
-                <div class="confidence-text" id="confidenceText">Confidence: 0%</div>
+                
+                <div class="controls">
+                    <button id="startBtn" class="btn btn-primary">Start Camera</button>
+                    <button id="stopBtn" class="btn btn-secondary" disabled>Stop Camera</button>
+                    <button id="captureBtn" class="btn btn-success" disabled>Capture Photo</button>
+                </div>
             </div>
             
-            <div class="predictions-grid" id="predictionsGrid">
-                <div class="prediction-item">
-                    <span class="emotion-label angry">Angry</span>
-                    <div class="prediction-bar">
-                        <div class="prediction-fill" id="angryBar"></div>
+            <div class="results-section">
+                <div class="results">
+                    <div id="emotion" class="emotion-display">
+                        <div class="emotion-text">Emotion: Ready to detect...</div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" id="confidenceFill"></div>
+                        </div>
+                        <div class="confidence-text" id="confidenceText">Confidence: 0%</div>
                     </div>
-                    <span class="prediction-value" id="angryValue">0%</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="emotion-label happy">Happy</span>
-                    <div class="prediction-bar">
-                        <div class="prediction-fill" id="happyBar"></div>
+                    
+                    <div class="predictions-grid" id="predictionsGrid">
+                        <div class="prediction-item">
+                            <span class="emotion-label angry">Angry</span>
+                            <div class="prediction-bar">
+                                <div class="prediction-fill" id="angryBar"></div>
+                            </div>
+                            <span class="prediction-value" id="angryValue">0%</span>
+                        </div>
+                        <div class="prediction-item">
+                            <span class="emotion-label happy">Happy</span>
+                            <div class="prediction-bar">
+                                <div class="prediction-fill" id="happyBar"></div>
+                            </div>
+                            <span class="prediction-value" id="happyValue">0%</span>
+                        </div>
+                        <div class="prediction-item">
+                            <span class="emotion-label neutral">Neutral</span>
+                            <div class="prediction-bar">
+                                <div class="prediction-fill" id="neutralBar"></div>
+                            </div>
+                            <span class="prediction-value" id="neutralValue">0%</span>
+                        </div>
                     </div>
-                    <span class="prediction-value" id="happyValue">0%</span>
-                </div>
-                <div class="prediction-item">
-                    <span class="emotion-label neutral">Neutral</span>
-                    <div class="prediction-bar">
-                        <div class="prediction-fill" id="neutralBar"></div>
-                    </div>
-                    <span class="prediction-value" id="neutralValue">0%</span>
                 </div>
             </div>
         </div>
@@ -163,7 +169,8 @@
             await predictEmotion(imageData);
             
             if (isRunning) {
-                requestAnimationFrame(predictLoop);
+                // Throttle to reduce backend CPU load on Render
+                setTimeout(() => requestAnimationFrame(predictLoop), 800);
             }
         }
 

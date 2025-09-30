@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+import logging
 import cv2
 import numpy as np
 import tensorflow as tf
@@ -9,6 +10,8 @@ from PIL import Image
 import os
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 # Load the model
 print("Loading model1_best.h5...")
@@ -51,14 +54,19 @@ def predict_emotion(image):
 
 @app.route('/')
 def index():
+    logger.info("GET / - rendering index.html")
     return render_template('index.html')
 
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         # Get image data from request
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
+        if 'image' not in data:
+            logger.warning("/predict called without 'image' in JSON body")
+            return jsonify({'success': False, 'error': "Missing 'image' in request body"}), 400
         image_data = data['image']
+        logger.info("/predict received image payload size=%s", len(image_data) if isinstance(image_data, str) else 'N/A')
         
         # Remove data URL prefix if present
         if ',' in image_data:
@@ -106,27 +114,30 @@ def predict():
                 'face_box': None
             })
         
+        logger.info("/predict returning %d result(s)", len(results))
         return jsonify({
             'success': True,
             'results': results
         })
         
     except Exception as e:
+        logger.exception("/predict failed: %s", e)
         return jsonify({
             'success': False,
             'error': str(e)
-        })
+        }), 500
 
 @app.route('/test', methods=['GET'])
 def test():
     """Test endpoint to verify the model is working"""
     try:
+        logger.info("GET /test - generating synthetic prediction")
         # Create a test image (random noise)
         test_image = np.random.randint(0, 255, (48, 48), dtype=np.uint8)
         processed_image = preprocess_image(test_image)
         emotion, confidence, all_predictions = predict_emotion(processed_image)
         
-        return jsonify({
+        resp = {
             'success': True,
             'message': 'Model is working correctly',
             'test_prediction': {
@@ -134,12 +145,15 @@ def test():
                 'confidence': float(confidence),
                 'all_predictions': dict(zip(classes, all_predictions))
             }
-        })
+        }
+        logger.info("/test ok - emotion=%s conf=%.3f", emotion, float(confidence))
+        return jsonify(resp)
     except Exception as e:
+        logger.exception("/test failed: %s", e)
         return jsonify({
             'success': False,
             'error': str(e)
-        })
+        }), 500
 
 if __name__ == '__main__':
     # Create templates directory if it doesn't exist
