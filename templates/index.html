@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Emotion Detection - Model1_best</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Real-Time Emotion Detection</h1>
+        <p class="subtitle">Powered by Model1_best.h5</p>
+        
+        <div class="video-container">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+            <div id="overlay" class="overlay"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" class="btn btn-primary">Start Camera</button>
+            <button id="stopBtn" class="btn btn-secondary" disabled>Stop Camera</button>
+            <button id="captureBtn" class="btn btn-success" disabled>Capture Photo</button>
+        </div>
+        
+        <div class="results">
+            <div id="emotion" class="emotion-display">
+                <div class="emotion-text">Emotion: Ready to detect...</div>
+                <div class="confidence-bar">
+                    <div class="confidence-fill" id="confidenceFill"></div>
+                </div>
+                <div class="confidence-text" id="confidenceText">Confidence: 0%</div>
+            </div>
+            
+            <div class="predictions-grid" id="predictionsGrid">
+                <div class="prediction-item">
+                    <span class="emotion-label angry">Angry</span>
+                    <div class="prediction-bar">
+                        <div class="prediction-fill" id="angryBar"></div>
+                    </div>
+                    <span class="prediction-value" id="angryValue">0%</span>
+                </div>
+                <div class="prediction-item">
+                    <span class="emotion-label happy">Happy</span>
+                    <div class="prediction-bar">
+                        <div class="prediction-fill" id="happyBar"></div>
+                    </div>
+                    <span class="prediction-value" id="happyValue">0%</span>
+                </div>
+                <div class="prediction-item">
+                    <span class="emotion-label neutral">Neutral</span>
+                    <div class="prediction-bar">
+                        <div class="prediction-fill" id="neutralBar"></div>
+                    </div>
+                    <span class="prediction-value" id="neutralValue">0%</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status" id="status">
+            <div class="status-indicator" id="statusIndicator"></div>
+            <span id="statusText">Ready</span>
+        </div>
+    </div>
+
+    <script>
+        let video, canvas, context;
+        let isRunning = false;
+        let stream = null;
+
+        // DOM elements
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const captureBtn = document.getElementById('captureBtn');
+        const emotionDisplay = document.getElementById('emotion');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            context = canvas.getContext('2d');
+            
+            setupEventListeners();
+            updateStatus('Ready to start', 'ready');
+        });
+
+        function setupEventListeners() {
+            startBtn.addEventListener('click', startCamera);
+            stopBtn.addEventListener('click', stopCamera);
+            captureBtn.addEventListener('click', capturePhoto);
+        }
+
+        async function startCamera() {
+            try {
+                updateStatus('Starting camera...', 'loading');
+                
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    video.play();
+                    isRunning = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    captureBtn.disabled = false;
+                    updateStatus('Camera active - Detecting emotions...', 'active');
+                    predictLoop();
+                };
+                
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                updateStatus('Camera access denied. Please allow camera permissions.', 'error');
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            isRunning = false;
+            video.srcObject = null;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            captureBtn.disabled = true;
+            updateStatus('Camera stopped', 'ready');
+            
+            // Clear display
+            document.querySelector('.emotion-text').textContent = 'Emotion: Ready to detect...';
+            document.getElementById('confidenceText').textContent = 'Confidence: 0%';
+            clearPredictions();
+        }
+
+        function capturePhoto() {
+            if (!isRunning) return;
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0);
+            
+            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+            predictEmotion(imageData);
+        }
+
+        async function predictLoop() {
+            if (!isRunning) return;
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0);
+            
+            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+            await predictEmotion(imageData);
+            
+            if (isRunning) {
+                requestAnimationFrame(predictLoop);
+            }
+        }
+
+        async function predictEmotion(imageData) {
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ image: imageData })
+                });
+
+                const data = await response.json();
+                
+                if (data.success && data.results.length > 0) {
+                    const result = data.results[0];
+                    updateEmotionDisplay(result);
+                    drawFaceBoxes(data.results);
+                } else {
+                    updateStatus('No face detected', 'warning');
+                }
+                
+            } catch (error) {
+                console.error('Prediction error:', error);
+                updateStatus('Prediction failed', 'error');
+            }
+        }
+
+        function updateEmotionDisplay(result) {
+            const { emotion, confidence, all_predictions } = result;
+            
+            // Update main emotion display
+            document.querySelector('.emotion-text').textContent = `Emotion: ${emotion.toUpperCase()}`;
+            document.getElementById('confidenceText').textContent = `Confidence: ${(confidence * 100).toFixed(1)}%`;
+            
+            // Update confidence bar
+            const confidenceFill = document.getElementById('confidenceFill');
+            confidenceFill.style.width = `${confidence * 100}%`;
+            confidenceFill.className = `confidence-fill ${emotion}`;
+            
+            // Update prediction bars
+            updatePredictionBar('angry', all_predictions.angry);
+            updatePredictionBar('happy', all_predictions.happy);
+            updatePredictionBar('neutral', all_predictions.neutral);
+        }
+
+        function updatePredictionBar(emotion, value) {
+            const bar = document.getElementById(`${emotion}Bar`);
+            const text = document.getElementById(`${emotion}Value`);
+            
+            bar.style.width = `${value * 100}%`;
+            text.textContent = `${(value * 100).toFixed(1)}%`;
+        }
+
+        function clearPredictions() {
+            ['angry', 'happy', 'neutral'].forEach(emotion => {
+                document.getElementById(`${emotion}Bar`).style.width = '0%';
+                document.getElementById(`${emotion}Value`).textContent = '0%';
+            });
+            document.getElementById('confidenceFill').style.width = '0%';
+        }
+
+        function drawFaceBoxes(results) {
+            const overlay = document.getElementById('overlay');
+            overlay.innerHTML = '';
+            
+            results.forEach(result => {
+                if (result.face_box) {
+                    const [x, y, w, h] = result.face_box;
+                    const faceBox = document.createElement('div');
+                    faceBox.className = 'face-box';
+                    faceBox.style.left = `${x}px`;
+                    faceBox.style.top = `${y}px`;
+                    faceBox.style.width = `${w}px`;
+                    faceBox.style.height = `${h}px`;
+                    faceBox.style.borderColor = getEmotionColor(result.emotion);
+                    overlay.appendChild(faceBox);
+                }
+            });
+        }
+
+        function getEmotionColor(emotion) {
+            const colors = {
+                'angry': '#ff4444',
+                'happy': '#44ff44',
+                'neutral': '#4444ff'
+            };
+            return colors[emotion] || '#ffffff';
+        }
+
+        function updateStatus(message, type) {
+            statusText.textContent = message;
+            statusIndicator.className = `status-indicator ${type}`;
+        }
+
+        // Test connection on load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/test');
+                const data = await response.json();
+                if (data.success) {
+                    console.log('Model is ready:', data.message);
+                }
+            } catch (error) {
+                console.error('Model test failed:', error);
+                updateStatus('Model connection failed', 'error');
+            }
+        });
+    </script>
+</body>
+</html>

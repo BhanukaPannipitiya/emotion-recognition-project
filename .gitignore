@@ -1,0 +1,65 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.nbconvert/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+env/
+.venv/
+venv/
+ENV/
+
+# Data and caches (excluded from repo)
+# Robust patterns to ensure the `data` directory is ignored
+/data/
+data/
+data/*
+data/**
+# Keep placeholder if needed
+!data/.gitkeep
+cache/
+saved_model/
+*.tfrecord
+*.pkl
+*.pickle
+*.joblib
+*.npz
+
+# Models: keep only the working one
+*.h5
+!model1_best.h5
+# Other model artifacts not used
+model2_best.h5
+model2_fine_best.h5
+model.json
+group1-shard*.bin
+
+# Root-level static html/css (we use Flask templates/static)
+/index.html
+/styles.css
+
+# Node
+node_modules/
+
+# Render / build outputs
+.render/
+dist/
+build/
+
+# Env files / secrets
+*.env
+.env
+.env.*
+.envrc
